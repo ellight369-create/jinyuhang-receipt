@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>金裕行｜單據批次辨識入帳與歸檔系統</title>
+  <style>
+    :root {
+      --primary: #1e40af;
+      --primary-hover: #1d4ed8;
+      --success: #15803d;
+      --amber: #b45309;
+      --bg: #f1f5f9;
+      --card: #ffffff;
+      --border: #cbd5e1;
+      --text: #0f172a;
+    }
+    * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans TC", sans-serif; }
+    body { margin: 0; padding: 16px; background: var(--bg); color: var(--text); }
+    .container { max-width: 900px; margin: 0 auto; }
+    .card { background: var(--card); border-radius: 12px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); margin-bottom: 16px; }
+    h1 { font-size: 1.3rem; margin: 0 0 12px; color: var(--primary); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
+    .badge { font-size: 0.75rem; background: #dbeafe; color: #1e40af; padding: 4px 8px; border-radius: 6px; }
+    label { display: block; font-weight: 600; margin-bottom: 6px; font-size: 0.9rem; }
+    input[type="text"], input[type="password"], select {
+      width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 1rem; margin-bottom: 12px;
+    }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    @media (max-width: 600px) { .grid-2 { grid-template-columns: 1fr; } }
+    .btn {
+      width: 100%; padding: 12px; border: none; border-radius: 8px; font-size: 1rem; font-weight: 600; cursor: pointer; transition: 0.2s;
+    }
+    .btn-primary { background: var(--primary); color: #fff; }
+    .btn-primary:hover { background: var(--primary-hover); }
+    .btn-primary:disabled { background: #94a3b8; cursor: not-allowed; }
+    .btn-success { background: var(--success); color: #fff; }
+    .btn-amber { background: var(--amber); color: #fff; }
+    .btn-outline { background: transparent; border: 1px solid var(--border); color: var(--text); padding: 6px 10px; font-size: 0.85rem; width: auto; }
+    .thumb-strip { display: flex; gap: 8px; overflow-x: auto; padding: 8px 0; }
+    .thumb-strip img { height: 80px; border-radius: 6px; border: 1px solid var(--border); object-fit: cover; }
+    .batch-item { border: 1px solid var(--border); border-radius: 10px; padding: 14px; margin-bottom: 14px; background: #f8fafc; }
+    .batch-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; gap: 10px; flex-wrap: wrap; }
+    .batch-thumb { width: 70px; height: 70px; object-fit: cover; border-radius: 6px; border: 1px solid var(--border); cursor: zoom-in; }
+    table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 0.88rem; background: #fff; }
+    th, td { border: 1px solid var(--border); padding: 5px; text-align: left; }
+    th { background: #f1f5f9; }
+    td input { width: 100%; border: none; padding: 4px; font-size: 0.88rem; background: transparent; }
+    td input:focus { outline: 2px solid var(--primary); background: #fff; border-radius: 4px; }
+    .table-wrap { overflow-x: auto; }
+    .status { padding: 10px; border-radius: 8px; margin-top: 10px; font-size: 0.9rem; display: none; line-height: 1.5; }
+    .status.info { background: #e0f2fe; color: #0369a1; display: block; }
+    .status.ok { background: #dcfce7; color: #166534; display: block; }
+    .status.err { background: #fee2e2; color: #991b1b; display: block; }
+    .mode-hint { font-size: 0.82rem; color: #b45309; background: #fef3c7; padding: 8px 10px; border-radius: 6px; margin-bottom: 12px; display: none; }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <!-- 密碼鎖定畫面 -->
+  <div class="card" id="lockScreen">
+    <h1>
+      🔒 金裕行｜系統安全驗證
+      <span class="badge">零對話額度版</span>
+    </h1>
+    <p style="font-size:0.9rem; color:#475569; margin-top:0;">請輸入系統連線網址與操作密碼以解鎖使用（驗證通過後本裝置將自動記憶）。</p>
+
+    <label for="gasUrlInput">Google Apps Script 網頁應用程式網址</label>
+    <input type="text" id="gasUrlInput" placeholder="https://script.google.com/macros/s/...../exec" />
+
+    <label for="pinInput">操作密碼（ACCESS_PIN）</label>
+    <input type="password" id="pinInput" placeholder="請輸入操作密碼" onkeyup="if(event.key==='Enter') unlockSystem()" />
+
+    <button id="unlockBtn" class="btn btn-primary" onclick="unlockSystem()">🔓 驗證並解鎖系統</button>
+    <div id="lockStatus" class="status"></div>
+  </div>
+
+  <!-- 主操作介面 -->
+  <div id="mainApp" style="display:none;">
+    <div class="card">
+      <h1>
+        金裕行｜單據批次辨識與歸檔
+        <button class="btn btn-outline" onclick="lockSystem()">🔒 鎖定 / 變更設定</button>
+      </h1>
+
+      <div class="grid-2">
+        <div>
+          <label for="ledgerSelect">1. 選擇帳本（共 8 本）或歸檔模式</label>
+          <select id="ledgerSelect" onchange="handleModeChange()">
+            <option value="學校帳">1. 學校帳</option>
+            <option value="醫院">2. 醫院</option>
+            <option value="公所">3. 公所</option>
+            <option value="安德">4. 安德</option>
+            <option value="全聯">5. 全聯</option>
+            <option value="協聯">6. 協聯</option>
+            <option value="小販帳">7. 小販帳</option>
+            <option value="第8本帳本名稱">8. 第8本帳本名稱</option>
+            <option value="舅舅單據">📁 舅舅單據（僅歸檔照片，不入帳）</option>
+          </select>
+        </div>
+        <div>
+          <label for="fileInput">2. 選擇單張或多張單據照片（支援批次）</label>
+          <input type="file" id="fileInput" accept="image/*" multiple onchange="handleMultiImageUpload(event)" />
+        </div>
+      </div>
+
+      <div id="uncleModeHint" class="mode-hint">
+        💡 目前為「舅舅單據」模式：系統僅辨識每張單據日期，並依 <strong>115-11-12-1</strong> 流水號自動歸檔至「舅舅單據」雲端資料夾，不會寫入試算表。
+      </div>
+
+      <div id="thumbStrip" class="thumb-strip"></div>
+
+      <button id="parseBtn" class="btn btn-primary" onclick="parseAllReceipts()" disabled>🔍 開始批次 AI 辨識</button>
+      <div id="statusBox" class="status"></div>
+    </div>
+
+    <!-- 批次核對與寫入區 -->
+    <div class="card" id="batchResultCard" style="display:none;">
+      <label style="font-size:1rem; margin-bottom:12px;">3. 逐張核對辨識結果（可直接修改數值或刪除）</label>
+      <div id="batchContainer"></div>
+      <button id="saveAllBtn" class="btn btn-success" onclick="saveAllBatches()">💾 確認全部無誤，批次寫入並歸檔</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  let queuedImages = []; // [{ id, name, base64, mime, dataUrl, rows, uncleDate }]
+  let currentGasUrl = "";
+  let currentPin = "";
+
+  window.onload = () => {
+    const savedUrl = localStorage.getItem("jinyuhang_gas_url") || "";
+    const savedPin = localStorage.getItem("jinyuhang_access_pin") || "";
+    document.getElementById("gasUrlInput").value = savedUrl;
+    document.getElementById("pinInput").value = savedPin;
+
+    if (savedUrl && savedPin) {
+      currentGasUrl = savedUrl;
+      currentPin = savedPin;
+      document.getElementById("lockScreen").style.display = "none";
+      document.getElementById("mainApp").style.display = "block";
+    }
+  };
+
+  async function unlockSystem() {
+    const url = document.getElementById("gasUrlInput").value.trim();
+    const pin = document.getElementById("pinInput").value.trim();
+    const statusBox = document.getElementById("lockStatus");
+    const btn = document.getElementById("unlockBtn");
+
+    if (!url || !pin) {
+      statusBox.className = "status err";
+      statusBox.innerText = "請完整輸入 GAS 網址與操作密碼！";
+      return;
+    }
+
+    btn.disabled = true;
+    statusBox.className = "status info";
+    statusBox.innerText = "⏳ 正在向伺服器驗證密碼...";
+
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        body: JSON.stringify({ action: "verify_pin", pin: pin })
+      });
+      const result = await res.json();
+      if (result.status !== "success") throw new Error(result.message);
+
+      localStorage.setItem("jinyuhang_gas_url", url);
+      localStorage.setItem("jinyuhang_access_pin", pin);
+      currentGasUrl = url;
+      currentPin = pin;
+
+      document.getElementById("lockScreen").style.display = "none";
+      document.getElementById("mainApp").style.display = "block";
+      statusBox.style.display = "none";
+    } catch (err) {
+      statusBox.className = "status err";
+      statusBox.innerText = "❌ 驗證失敗：" + err.message;
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  function lockSystem() {
+    document.getElementById("mainApp").style.display = "none";
+    document.getElementById("lockScreen").style.display = "block";
+  }
+
+  function handleModeChange() {
+    const isUncle = document.getElementById("ledgerSelect").value === "舅舅單據";
+    document.getElementById("uncleModeHint").style.display = isUncle ? "block" : "none";
+    document.getElementById("batchResultCard").style.display = "none";
+  }
+
+  function showStatus(msg, type) {
+    const box = document.getElementById("statusBox");
+    box.className = "status " + type;
+    box.innerText = msg;
+  }
+
+  function compressImageFile(file) {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement("canvas");
+          const MAX_SIZE = 1400;
+          let width = img.width, height = img.height;
+          if (width > height && width > MAX_SIZE) {
+            height *= MAX_SIZE / width;
+            width = MAX_SIZE;
+          } else if (height > MAX_SIZE) {
+            width *= MAX_SIZE / height;
+            height = MAX_SIZE;
+          }
+          canvas.width = width;
+          canvas.height = height;
+          canvas.getContext("2d").drawImage(img, 0, 0, width, height);
+          const dataUrl = canvas.toDataURL("image/jpeg", 0.82);
+          resolve({
+            name: file.name,
+            dataUrl: dataUrl,
+            base64: dataUrl.split(",")[1],
+            mime: "image/jpeg"
+          });
+        };
+        img.src = e.target.result;
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function handleMultiImageUpload(event) {
+    const files = Array.from(event.target.files);
+    if (!files.length) return;
+
+    showStatus(`⏳ 正在壓縮處理 ${files.length} 張單據照片...`, "info");
+    queuedImages = [];
+    const strip = document.getElementById("thumbStrip");
+    strip.innerHTML = "";
+
+    for (let i = 0; i < files.length; i++) {
+      const compressed = await compressImageFile(files[i]);
+      queuedImages.push({ id: i, ...compressed, rows: [], uncleDate: "" });
+      const imgEl = document.createElement("img");
+      imgEl.src = compressed.dataUrl;
+      strip.appendChild(imgEl);
+    }
+
+    document.getElementById("parseBtn").disabled = false;
+    document.getElementById("batchResultCard").style.display = "none";
+    showStatus(`✅ 已載入 ${queuedImages.length} 張照片，點擊「開始批次 AI 辨識」進行解析。`, "info");
+  }
+
+  async function parseAllReceipts() {
+    const ledger = document.getElementById("ledgerSelect").value;
+    const isUncle = ledger === "舅舅單據";
+    const btn = document.getElementById("parseBtn");
+    btn.disabled = true;
+
+    const container = document.getElementById("batchContainer");
+    container.innerHTML = "";
+
+    try {
+      for (let i = 0; i < queuedImages.length; i++) {
+        const item = queuedImages[i];
+        showStatus(`⏳ 正在辨識第 ${i + 1} / ${queuedImages.length} 張單據（${item.name}）...`, "info");
+
+        const res = await fetch(currentGasUrl, {
+          method: "POST",
+          body: JSON.stringify({
+            pin: currentPin,
+            action: isUncle ? "parse_uncle_date" : "parse",
+            imageBase64: item.base64,
+            mimeType: item.mime
+          })
+        });
+        const result = await res.json();
+        if (result.status !== "success") throw new Error(`第 ${i + 1} 張失敗：${result.message}`);
+
+        if (isUncle) {
+          item.uncleDate = result.date || "";
+          renderUncleBatchCard(item, i);
+        } else {
+          item.rows = result.data || [];
+          renderLedgerBatchCard(item, i);
+        }
+      }
+
+      document.getElementById("batchResultCard").style.display = "block";
+      const saveBtn = document.getElementById("saveAllBtn");
+      saveBtn.className = isUncle ? "btn btn-amber" : "btn btn-success";
+      saveBtn.innerText = isUncle
+        ? `📁 確認全部日期，批次歸檔 ${queuedImages.length} 張舅舅單據`
+        : `💾 確認全部明細，批次寫入【${ledger}】並歸檔照片`;
+
+      showStatus(`✅ 全部 ${queuedImages.length} 張單據辨識完成！請核對下方內容後送出。`, "ok");
+    } catch (err) {
+      showStatus("❌ 辨識中斷：" + err.message, "err");
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  function renderUncleBatchCard(item, idx) {
+    const container = document.getElementById("batchContainer");
+    const div = document.createElement("div");
+    div.className = "batch-item";
+    div.dataset.idx = idx;
+    div.innerHTML = `
+      <div class="batch-header">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <img src="${item.dataUrl}" class="batch-thumb" onclick="window.open(this.src)" title="點擊放大預覽" />
+          <div>
+            <strong>第 ${idx + 1} 張單據</strong><br/>
+            <span style="font-size:0.8rem; color:#64748b;">${item.name}</span>
+          </div>
+        </div>
+        <button class="btn btn-outline" style="color:red;" onclick="this.closest('.batch-item').remove()">✕ 移除此張</button>
+      </div>
+      <label>辨識民國年日期（將依此日期流水號歸檔）</label>
+      <input type="text" class="uncle-date-field" value="${item.uncleDate}" placeholder="例如：115/11/12" style="margin-bottom:0;" />
+    `;
+    container.appendChild(div);
+  }
+
+  function renderLedgerBatchCard(item, idx) {
+    const container = document.getElementById("batchContainer");
+    const div = document.createElement("div");
+    div.className = "batch-item";
+    div.dataset.idx = idx;
+
+    let rowsHtml = item.rows.map(r => buildRowTrHtml(r)).join("");
+    div.innerHTML = `
+      <div class="batch-header">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <img src="${item.dataUrl}" class="batch-thumb" onclick="window.open(this.src)" title="點擊放大預覽" />
+          <div>
+            <strong>第 ${idx + 1} 張單據</strong><br/>
+            <span style="font-size:0.8rem; color:#64748b;">${item.name}</span>
+          </div>
+        </div>
+        <div style="display:flex; gap:6px;">
+          <button class="btn btn-outline" onclick="addRowToCard(this)">＋ 新增列</button>
+          <button class="btn btn-outline" style="color:red;" onclick="this.closest('.batch-item').remove()">✕ 移除此張</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th style="width:15%">日期</th>
+              <th style="width:16%">對象</th>
+              <th style="width:14%">品項</th>
+              <th style="width:12%">重量</th>
+              <th style="width:11%">單價</th>
+              <th style="width:14%">金額</th>
+              <th style="width:12%">備註</th>
+              <th style="width:6%">刪</th>
+            </tr>
+          </thead>
+          <tbody>${rowsHtml}</tbody>
+        </table>
+      </div>
+    `;
+    container.appendChild(div);
+  }
+
+  function buildRowTrHtml(r) {
+    return `
+      <tr>
+        <td><input type="text" value="${r.date || ''}" /></td>
+        <td><input type="text" value="${r.target || ''}" /></td>
+        <td><input type="text" value="${r.item || ''}" /></td>
+        <td><input type="number" step="any" value="${r.weight ?? 0}" /></td>
+        <td><input type="number" step="any" value="${r.price ?? 0}" /></td>
+        <td><input type="number" step="any" value="${r.amount ?? 0}" /></td>
+        <td><input type="text" value="${r.note || ''}" /></td>
+        <td style="text-align:center;"><button style="color:red;border:none;background:none;cursor:pointer;" onclick="this.closest('tr').remove()">✕</button></td>
+      </tr>
+    `;
+  }
+
+  function addRowToCard(btn) {
+    const tbody = btn.closest(".batch-item").querySelector("tbody");
+    tbody.insertAdjacentHTML("beforeend", buildRowTrHtml({}));
+  }
+
+  async function saveAllBatches() {
+    const ledger = document.getElementById("ledgerSelect").value;
+    const isUncle = ledger === "舅舅單據";
+    const cards = Array.from(document.querySelectorAll(".batch-item"));
+
+    if (!cards.length) {
+      alert("沒有可送出的單據項目！");
+      return;
+    }
+
+    const saveBtn = document.getElementById("saveAllBtn");
+    saveBtn.disabled = true;
+    let logs = [];
+
+    try {
+      for (let i = 0; i < cards.length; i++) {
+        const card = cards[i];
+        const origIdx = parseInt(card.dataset.idx, 10);
+        const imgObj = queuedImages[origIdx];
+        showStatus(`⏳ 正在處理第 ${i + 1} / ${cards.length} 張單據存檔...`, "info");
+
+        if (isUncle) {
+          const dateVal = card.querySelector(".uncle-date-field").value.trim();
+          if (!dateVal) throw new Error(`第 ${i + 1} 張單據尚未填寫日期！`);
+
+          const res = await fetch(currentGasUrl, {
+            method: "POST",
+            body: JSON.stringify({
+              pin: currentPin,
+              action: "archive_uncle",
+              date: dateVal,
+              imageBase64: imgObj.base64,
+              mimeType: imgObj.mime
+            })
+          });
+          const result = await res.json();
+          if (result.status !== "success") throw new Error(result.message);
+          logs.push(`第 ${i + 1} 張：${result.message}`);
+        } else {
+          const trs = Array.from(card.querySelectorAll("tbody tr"));
+          const rows = trs.map(tr => {
+            const inputs = tr.querySelectorAll("input");
+            return {
+              date: inputs[0].value.trim(),
+              target: inputs[1].value.trim(),
+              item: inputs[2].value.trim(),
+              weight: parseFloat(inputs[3].value) || 0,
+              price: parseFloat(inputs[4].value) || 0,
+              amount: parseFloat(inputs[5].value) || 0,
+              note: inputs[6].value.trim()
+            };
+          });
+
+          const res = await fetch(currentGasUrl, {
+            method: "POST",
+            body: JSON.stringify({
+              pin: currentPin,
+              action: "save",
+              ledger: ledger,
+              rows: rows,
+              imageBase64: imgObj.base64,
+              mimeType: imgObj.mime
+            })
+          });
+          const result = await res.json();
+          if (result.status !== "success") throw new Error(result.message);
+          logs.push(`第 ${i + 1} 張：${result.message}`);
+        }
+      }
+
+      showStatus("🎉 全部批次處理完成！\n" + logs.join("\n"), "ok");
+      document.getElementById("batchResultCard").style.display = "none";
+      document.getElementById("thumbStrip").innerHTML = "";
+      document.getElementById("fileInput").value = "";
+      document.getElementById("parseBtn").disabled = true;
+      queuedImages = [];
+    } catch (err) {
+      showStatus("❌ 批次寫入中斷：" + err.message, "err");
+    } finally {
+      saveBtn.disabled = false;
+    }
+  }
+</script>
+</body>
+</html>
